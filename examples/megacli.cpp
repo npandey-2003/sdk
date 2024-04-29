@@ -34,6 +34,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <unordered_map>
 #include "mega/testhooks.h"
 
 #if defined(_WIN32) && defined(_DEBUG)
@@ -2227,6 +2228,37 @@ static void nodepath(NodeHandle h, string* path)
     *path = n ? n->displaypath() : "";
 }
 
+static void recursive_traverse(Node* n, unsigned short depth 
+    , std::unordered_map<std::string, size_t> &filetypetosize
+    , size_t &fileCnt, size_t &folderCnt)
+{
+    if (depth)
+    {
+        auto titleTmp = n->displayname();
+        switch (n->type)
+        {
+            case FILENODE:
+            {
+                ++fileCnt;
+                std::string ext;
+                if(Node::getExtension(ext, titleTmp))
+                {
+                    filetypetosize[ext] += n->size;
+                }
+            break;
+            }
+            case FOLDERNODE:
+                ++folderCnt;
+                break; 
+        }
+    }
+    if (n->type != FILENODE)
+    {
+        for (const auto& node : client->getChildren(n))
+            recursive_traverse(node.get(), depth + 1, filetypetosize, fileCnt, folderCnt);
+    }
+}
+
 appfile_list appxferq[2];
 
 static const char* prompts[] =
@@ -4123,6 +4155,7 @@ autocomplete::ACN autocompleteSyntax()
     p->Add(exec_numberofnodes, sequence(text("nn")));
     p->Add(exec_numberofchildren, sequence(text("nc"), opt(remoteFSPath(client, &cwd))));
     p->Add(exec_searchbyname, sequence(text("sbn"), param("name"), opt(param("nodeHandle")), opt(flag("-norecursive")), opt(flag("-nosensitive"))));
+    p->Add(exec_getfilesizeperfiletyp, sequence(text("lsft"), opt(remoteFSPath(client, &cwd))));
     p->Add(exec_nodedescription,
            sequence(text("nodedescription"),
                     remoteFSPath(client, &cwd),
@@ -11582,6 +11615,40 @@ void exec_searchbyname(autocomplete::ACState &s)
     }
 }
 
+void exec_getfilesizeperfiletyp(autocomplete::ACState &s)
+{
+    std::shared_ptr<Node> n;
+
+    if (s.words.size() > 1)
+    {
+        n = nodebypath(s.words[1].s.c_str());
+        if (!n)
+        {
+            cout << s.words[1].s << ": No such file or directory" << endl;
+            return;
+        }
+    }
+    else
+    {
+        n = client->nodeByHandle(cwd);
+        if (!n)
+        {
+            cout << "cwd not set" << endl;
+            return;
+        }
+    }
+
+    std::unordered_map<std::string, size_t> filetypetosize;
+    size_t fileCount = 0, folderCount = 0;
+    recursive_traverse(n.get(), 0, filetypetosize, fileCount, folderCount);
+    cout << "File Count: " << fileCount << std::endl;
+    cout << "Folder Count: " << folderCount << std::endl;
+    for (const auto &ele : filetypetosize)
+    {
+        cout << "File Type: " << ele.first << ", File Size: " << ele.second << endl;
+    }
+
+}
 void exec_secure(autocomplete::ACState &s)
 {
     if (s.extractflag("-on"))
